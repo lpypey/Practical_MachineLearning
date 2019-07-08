@@ -1,0 +1,131 @@
+---
+title: "Practical Machine Learning Project Report"
+author: "Bert"
+date: "8 juli 2019"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Preprocessing  
+```{r, cache = T}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+
+```
+### Downloading the Data
+```{r, cache = T}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./data/pml-training.csv"
+testFile  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile)
+}
+```
+
+### Reading the Data
+After downloading the data from the data source, we can read the two csv files into two data frames.  
+```{r, cache = T}
+trainRaw <- read.csv("./data/pml-training.csv")
+testRaw <- read.csv("./data/pml-testing.csv")
+dim(trainRaw)
+#head(trainRaw)
+dim(testRaw)
+#head(testRaw)
+```
+
+The training data set has 19622 observations and 160 variables
+The testing data set has 20 observations and 160 variables
+
+### Clean the data
+
+Removing columns that contain NA missing values.
+```{r, cache = T}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+dim(trainRaw)
+names(trainRaw)
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0] 
+dim(testRaw)
+names(testRaw)
+```  
+
+Removing columns that do not contribute much to the accelerometer measurements.
+```{r, cache = T}
+head(trainRaw$classe)
+classe <- trainRaw$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainRaw))
+trainRemove
+trainRaw <- trainRaw[, !trainRemove]
+dim(trainRaw)
+trainCleaned <- trainRaw[, sapply(trainRaw, is.numeric)]
+dim(trainCleaned)
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testRaw))
+testRaw <- testRaw[, !testRemove]
+testCleaned <- testRaw[, sapply(testRaw, is.numeric)]
+dim(testCleaned)
+```
+
+The training data set has 19622 observations and 53 remaining  variables
+The testing data set has 20 observations and remaining 53 variables
+
+
+### Split the data
+Splitting the cleaned training set into a pure training data set (70%) and a validation data set (30%). 
+Validation data will be used to conduct cross validation in future steps.  
+```{r, cache = T}
+set.seed(100) # For reproducibile purpose
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=FALSE)
+trainData <- trainCleaned[inTrain, ]
+dim(trainData)
+testData <- trainCleaned[-inTrain, ]
+dim(testData)
+```
+
+
+## Data Modeling
+Using Random Forest algorithm to fit a predictive model for activity recognition.
+Random Forest automatically selects important variables and is robust to correlated covariates & outliers in general. A **3-fold cross validation  and ntree = 100** is chosen when applying the algorithm.  
+```{r, cache = T}
+controlRf <- trainControl(method="cv", 3)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=100)
+modelRf
+```
+Estimation performance of the model on the validation data set.  
+```{r, cache = T}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+accuracy <- data.frame(postResample(predictRf, testData$classe))
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+Estimated accuracy of the model is `r 100*round(accuracy[1,1],digits=4)`% and the estimated out-of-sample error is `r 100*round(oose, digits=4)`%.
+
+## Predicting for Test Data Set
+Applying the model to the original testing data set downloaded from the data source. We remove the `problem_id` column first.  
+```{r, cache = T}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```  
+
+## Appendix: Figures
+Decision Tree Visualization
+```{r, cache = T, fig.width=6, fig.height=8}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
